@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools", "setuptools-scm"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools_scm]
+write_to = "src/deva/_version.py"
+
+[project]
+name = "deva"
+authors = [
+    {name = "Brenda Gutman", email="brenda.gutman@vumc.org"}
+]
+description = "Data Expectations Validation Assistant"
+readme = "README.md"
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3",
+]
+dependencies = ["pandas", "numpy", "rich"]
+
+[tool.setuptools.packages.find]
+where = ["src"]  # list of folders that contain the packages (["."] by default)
+
+[tool.setuptools.package-data]
+deva = []
+
+[project.scripts]
+characterize_datafile = "deva.actions.characterize_datafile:main"
+validate_alignment = "deva.actions.validate_alignment:main"
+generate_datadictionary = "deva.actions.generate_datadictionary:main"
