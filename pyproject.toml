@@ -18,6 +18,8 @@ classifiers = [
 ]
 dependencies = ["pandas", "numpy", "rich"]
 
+dynamic = ["version"]
+
 [tool.setuptools.packages.find]
 where = ["src"]  # list of folders that contain the packages (["."] by default)
 
