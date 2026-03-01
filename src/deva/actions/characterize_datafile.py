@@ -11,12 +11,15 @@ from datetime import date
 
 
 
-def generate_html_report(df: pd.DataFrame, out_path: str, filename: str,
+def generate_html_report(df: Optional[pd.DataFrame], out_path: str, filename: str,
                          dd_dtype_map: Optional[Dict[str, str]] = None,
                          dd_info_map: Optional[Dict[str, Dict[str, any]]] = None,
                          show_enums: Optional[set] = None,
                          hide_enums: Optional[set] = None,
-                         command: Optional[str] = None) -> None:
+                         command: Optional[str] = None,
+                         summary_df: Optional[pd.DataFrame] = None,
+                         numeric_df: Optional[pd.DataFrame] = None,
+                         total_rows: Optional[int] = None) -> None:
     """Generate a simple HTML characterization report for a DataFrame.
 
     The report includes an overview, a per-column summary, and numeric statistics.
@@ -24,7 +27,16 @@ def generate_html_report(df: pd.DataFrame, out_path: str, filename: str,
     If dd_info_map is provided it will also insert all other DD columns (prefixed with
     "dd_") into the per-column summary.
     """
-    n_rows, n_cols = df.shape
+    # Determine overview counts either from df or from provided summary
+    if summary_df is None:
+        if df is None:
+            n_rows, n_cols = 0, 0
+        else:
+            n_rows, n_cols = df.shape
+    else:
+        n_rows = int(total_rows) if total_rows is not None else 0
+        # number of columns equals rows in the summary
+        n_cols = int(summary_df.shape[0])
 
     overview = {
         "Filename": filename,
@@ -32,62 +44,63 @@ def generate_html_report(df: pd.DataFrame, out_path: str, filename: str,
         "Columns": n_cols,
     }
 
-    # Per-column summary
-    cols = [] 
-    for col in df.columns:
-        series = df[col]
-        non_null = int(series.notnull().sum())
-        pct_missing = round(100.0 * (n_rows - non_null) / n_rows, 2) if n_rows else 0.0
-        unique = int(series.nunique(dropna=True))
-        dtype = format_dtype_for_display(str(series.dtype))
-        sample = ""
-        if non_null:
-            sample_val = series.dropna().iloc[0]
-            sample = html.escape(str(sample_val))
+    # Per-column summary: either use provided summary_df or build from df
+    if summary_df is None:
+        cols = []
+        for col in df.columns:
+            series = df[col]
+            non_null = int(series.notnull().sum())
+            pct_missing = round(100.0 * (n_rows - non_null) / n_rows, 2) if n_rows else 0.0
+            unique = int(series.nunique(dropna=True))
+            dtype = format_dtype_for_display(str(series.dtype))
+            sample = ""
+            if non_null:
+                sample_val = series.dropna().iloc[0]
+                sample = html.escape(str(sample_val))
 
-        # Determine enumeration display based on flags
-        top_vals_str = ""
-        if show_enums and col in show_enums:
-            # show all unique values (sorted)
-            try:
-                uniq = sorted(series.dropna().unique())
-                top_vals_str = "; ".join([html.escape(str(v)) for v in uniq])
-            except Exception:
-                top_vals_str = ""
-        elif hide_enums and col in hide_enums:
-            top_vals_str = "SKIP"
-        else:
-            try:
-                top_vals = series.value_counts(dropna=True).head(5)
-                top_vals_str = "; ".join([f"{html.escape(str(v))} ({int(c)})" for v, c in top_vals.items()])
-            except Exception:
-                top_vals_str = ""
+            # Determine enumeration display based on flags
+            top_vals_str = ""
+            if show_enums and col in show_enums:
+                # show all unique values (sorted)
+                try:
+                    uniq = sorted(series.dropna().unique())
+                    top_vals_str = "; ".join([html.escape(str(v)) for v in uniq])
+                except Exception:
+                    top_vals_str = ""
+            elif hide_enums and col in hide_enums:
+                top_vals_str = "SKIP"
+            else:
+                try:
+                    top_vals = series.value_counts(dropna=True).head(5)
+                    top_vals_str = "; ".join([f"{html.escape(str(v))} ({int(c)})" for v, c in top_vals.items()])
+                except Exception:
+                    top_vals_str = ""
 
-        col_dict = {
-            "column": col,
-            "derived_dtype": dtype,
-            "non_null": non_null,
-            "pct_missing": pct_missing,
-            "unique": unique,
-            "sample": sample,
-            "enums": top_vals_str,
-        }
+            col_dict = {
+                "column": col,
+                "derived_dtype": dtype,
+                "non_null": non_null,
+                "pct_missing": pct_missing,
+                "unique": unique,
+                "sample": sample,
+                "enums": top_vals_str,
+            }
 
-        # Add DD datatype if available
-        if dd_dtype_map:
-            dd_dtype = dd_dtype_map.get(col, "")
-            col_dict["dd_dtype"] = dd_dtype
+            # Add DD datatype if available
+            if dd_dtype_map:
+                dd_dtype = dd_dtype_map.get(col, "")
+                col_dict["dd_dtype"] = dd_dtype
 
-        # Add any additional DD fields (prefix with dd_)
-        if dd_info_map and col in dd_info_map:
-            for k, v in dd_info_map[col].items():
-                if k == 'variable_name':
-                    continue
-                col_dict[f"dd_{k}"] = v
+            # Add any additional DD fields (prefix with dd_)
+            if dd_info_map and col in dd_info_map:
+                for k, v in dd_info_map[col].items():
+                    if k == 'variable_name':
+                        continue
+                    col_dict[f"dd_{k}"] = v
 
-        cols.append(col_dict)
+            cols.append(col_dict)
 
-    summary_df = pd.DataFrame(cols) 
+        summary_df = pd.DataFrame(cols)
 
     # Numeric statistics for numeric columns
     numeric_df: Optional[pd.DataFrame] 
@@ -320,7 +333,7 @@ def main():
         # call report generator with precomputed summary
         generate_html_report(None, out_path, filename, dd_dtype_map, dd_info_map,
                              show_enums=show_enums, hide_enums=hide_enums,
-                             command=command_str, summary_df=summary_df, numeric_df=numeric_df)
+                             command=command_str, summary_df=summary_df, numeric_df=numeric_df, total_rows=total_rows)
         print(f"Wrote HTML report to: {out_path}")
         return
 
