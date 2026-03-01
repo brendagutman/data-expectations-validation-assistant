@@ -61,32 +61,35 @@ def format_dtype_for_display(dtype_str: str) -> str:
     return dtype_str
 
 
-    # TODO: reports named by df or dd run
+def infer_dtype_from_samples(samples) -> str:
+    """A minimal dtype inference used when streaming.
 
-
-# Errors characterize_datafile -df ../_study_data/consort_gira/eMERGE_Person_Ex_Release_20260123.csv
-# Characterizing '../_study_data/consort_gira/eMERGE_Person_Ex_Release_20260123.csv' (26073 rows, 6 cols)...
-# Wrote HTML report to: eMERGE_Person_Ex_Release_20260123_characterization20260227.html
-# (venv-python3.12) (venv) anvil_dbt_project$ characterize_datafile -df ../_study_data/consort_gira/eMERGE_Measurement_Ex_Release_20260127.csv
-# Killed
-# (venv-python3.12) (venv) anvil_dbt_project$ characterize_datafile -df ../_study_data/consort_gira/eMERGE_ICD_Ex_Release_20260129.csv/home/jupyter/venv-python3.12/lib/python3.12/site-packages/deva/actions/characterize_datafile.py:111: DtypeWarning: Columns (6) havemixed types. Specify dtype option on import or set low_memory=False.
-#   df = pd.read_csv(file_path)
-# Killed
-# (venv-python3.12) (venv) anvil_dbt_project$ characterize_datafile -df ../_study_data/consort_gira/eMERGE_BMI_Ex_Release_20260128.csv/home/jupyter/venv-python3.12/lib/python3.12/site-packages/deva/actions/characterize_datafile.py:111: DtypeWarning: Columns (3,10) have mixed types. Specify dtype option on import or set low_memory=False.
-#   df = pd.read_csv(file_path)
-# Characterizing '../_study_data/consort_gira/eMERGE_BMI_Ex_Release_20260128.csv' (2734571 rows, 11 cols)...
-# Wrote HTML report to: eMERGE_BMI_Ex_Release_20260128_characterization20260227.html
-# (venv-python3.12) (venv) anvil_dbt_project$ characterize_datafile -df ../_study_data/consort_gira/eMERGE_CPT_Ex_Release_20260129.csv/home/jupyter/venv-python3.12/lib/python3.12/site-packages/deva/actions/characterize_datafile.py:111: DtypeWarning: Columns (2,5) have mixed types. Specify dtype option on import or set low_memory=False.
-#   df = pd.read_csv(file_path)
-# Characterizing '../_study_data/consort_gira/eMERGE_CPT_Ex_Release_20260129.csv' (5221255 rows, 6 cols)...
-# Wrote HTML report to: eMERGE_CPT_Ex_Release_20260129_characterization20260227.html
-# (venv-python3.12) (venv) anvil_dbt_project$ validate_alignment -df ../_study_data/consort_gira/eMERGE_Person_Ex_Release_20260123.csv -dd ../_study_data/consort_gira/Data Inventory_ eMERGE eIV to EHR for External Release on AnVIL - BMI DD.csv
-# usage: validate_alignment [-h] -dd DATA_DICTIONARY -df DATAFILE [-o OUTPUT]
-# validate_alignment: error: unrecognized arguments: Inventory_ eMERGE eIV to EHR for External Release on AnVIL - BMI DD.csv
-# (venv-python3.12) (venv) anvil_dbt_project$ validate_alignment -df ../_study_data/consort_gira/eMERGE_Person_Ex_Release_20260123.csv -dd ../_study_data/consort_gira/'Data Inventory_ eMERGE eIV to EHR for External Release on AnVIL - BMI DD.csv'
-# Validating alignment between '../_study_data/consort_gira/Data Inventory_ eMERGE eIV to EHR for External Release on AnVIL - BMI DD.csv' and '../_study_data/consort_gira/eMERGE_Person_Ex_Release_20260123.csv'...
-# Validation complete. 15 failure(s) found.
-# Wrote validation report to: alignment_validation_report.html
-# (venv-python3.12) (venv) anvil_dbt_project$ validate_alignment -df ../_study_data/consort_gira/eMERGE_Person_Ex_Release_20260123.csv -dd ../_study_data/consort_gira/'Data Inventory_ eMERGE eIV to EHR for External Release on AnVIL - Person DD.csv'
-# Validating alignment between '../_study_data/consort_gira/Data Inventory_ eMERGE eIV to EHR for External Release on AnVIL - Person DD.csv' and '../_study_data/consort_gira/eMERGE_Person_Ex_Release_20260123.csv'...
-# Validation complete. 0 failure(s) found.
+    Samples may be a list or iterable of values. Tries integer, float,
+    boolean-like, otherwise falls back to string.  Replicated from
+    *characterize_datafile* logic so both modules can share it.
+    """
+    if not samples:
+        return 'string'
+    # try integer
+    try:
+        for v in samples:
+            if v is None or (isinstance(v, float) and np.isnan(v)):
+                continue
+            int(str(v))
+        return 'integer'
+    except Exception:
+        pass
+    # try float
+    try:
+        for v in samples:
+            if v is None or (isinstance(v, float) and np.isnan(v)):
+                continue
+            float(str(v))
+        return 'float'
+    except Exception:
+        pass
+    # boolean-like
+    bool_set = {"true", "false", "True", "False", "0", "1", 0, 1}
+    if all(str(v) in bool_set for v in samples if v is not None):
+        return 'boolean'
+    return 'string'

@@ -5,7 +5,7 @@ import numpy as np
 import sys
 from collections import Counter
 from typing import Optional, Dict
-from deva.common import convert_df_dtypes, format_dtype_for_display
+from deva.common import convert_df_dtypes, format_dtype_for_display, infer_dtype_from_samples
 from pathlib import Path
 from datetime import date
 
@@ -86,17 +86,19 @@ def generate_html_report(df: Optional[pd.DataFrame], out_path: str, filename: st
                 "enums": top_vals_str,
             }
 
-            # Add DD datatype if available
+            # Add DD datatype if available (case-insensitive lookup)
             if dd_dtype_map:
-                dd_dtype = dd_dtype_map.get(col, "")
+                dd_dtype = dd_dtype_map.get(col.lower(), "")
                 col_dict["dd_dtype"] = dd_dtype
 
             # Add any additional DD fields (prefix with dd_)
-            if dd_info_map and col in dd_info_map:
-                for k, v in dd_info_map[col].items():
-                    if k == 'variable_name':
-                        continue
-                    col_dict[f"dd_{k}"] = v
+            if dd_info_map:
+                info = dd_info_map.get(col.lower())
+                if info:
+                    for k, v in info.items():
+                        if k == 'variable_name':
+                            continue
+                        col_dict[f"dd_{k}"] = v
 
             cols.append(col_dict)
 
@@ -132,11 +134,14 @@ def generate_html_report(df: Optional[pd.DataFrame], out_path: str, filename: st
     html_parts.append("</ul>")
 
     html_parts.append("<h2>Per-column summary</h2>")
-    html_parts.append(summary_df.to_html(index=False, escape=False))
+    # render without truncating long cell content (enums may be long)
+    with pd.option_context('display.max_colwidth', None):
+        html_parts.append(summary_df.to_html(index=False, escape=False))
 
     if numeric_df is not None and not numeric_df.empty:
         html_parts.append("<h2>Numeric column statistics</h2>")
-        html_parts.append(numeric_df.to_html(escape=False))
+        with pd.option_context('display.max_colwidth', None):
+            html_parts.append(numeric_df.to_html(escape=False))
 
     html_parts.append("</body></html>")
 
@@ -150,13 +155,13 @@ def main():
     parser = argparse.ArgumentParser(description="Characterize a datafile and write a simple HTML report.")
     parser.add_argument("-df","--data_file", required=True, help="Path to the datafile (CSV)")
     parser.add_argument("-dd", "--data_dictionary", required=False, help="Path to the data dictionary (CSV)")
-    parser.add_argument("--output", required=False, help="Output HTML path")
+    parser.add_argument("-o", "--output", required=False, help="Output HTML path")
     parser.add_argument("--show-enums", required=False,
                         help="Comma-separated columns for which full enumerations should be shown")
     parser.add_argument("--hide-enums", required=False,
                         help="Comma-separated columns for which enumerations should be suppressed")
-    parser.add_argument("--chunksize", required=False, type=int, default=0,
-                        help="Read the datafile in chunks of this size (streaming mode when >0).")
+    parser.add_argument("--chunksize", required=False, type=int, default=100000,
+                        help="Read the datafile in chunks of this size (default=100000).")
     parser.add_argument("--low-memory", action="store_true", help="Pass low_memory=True to pandas.read_csv (less memory at cost of type inference).")
     args = parser.parse_args()
 
@@ -174,17 +179,18 @@ def main():
         df = pd.read_csv(file_path, low_memory=low_memory_flag)
         df = convert_df_dtypes(df)
     
-    # Load data dictionary if provided
+    # Load data dictionary if provided (normalize keys to lowercase for case-insensitive matching)
     dd_dtype_map: Optional[Dict[str, str]] = None
     dd_info_map: Optional[Dict[str, Dict[str, any]]] = None
     if args.data_dictionary:
         dd = pd.read_csv(args.data_dictionary)
         # Create a mapping from variable_name to data_type
         if 'variable_name' in dd.columns and 'data_type' in dd.columns:
-            dd_dtype_map = dict(zip(dd['variable_name'], dd['data_type']))
-        # also build a full info map keyed by variable_name
+            dd_dtype_map = {str(k).lower(): v for k, v in zip(dd['variable_name'], dd['data_type'])}
+        # also build a full info map keyed by variable_name (lowercased)
         if 'variable_name' in dd.columns:
-            dd_info_map = dd.set_index('variable_name').to_dict(orient='index')
+            raw_info = dd.set_index('variable_name').to_dict(orient='index')
+            dd_info_map = {str(k).lower(): v for k, v in raw_info.items()}
 
     # process enumeration flags
     show_enums: Optional[set] = None
@@ -209,33 +215,6 @@ def main():
         UNIQUE_TRACK_CAP = 50000
         SAMPLE_CAP = 200
 
-        def infer_dtype_from_samples(samples):
-            # simple inference from sample strings
-            if not samples:
-                return 'string'
-            # try integer
-            try:
-                for v in samples:
-                    if v is None or (isinstance(v, float) and np.isnan(v)):
-                        continue
-                    int(str(v))
-                return 'integer'
-            except Exception:
-                pass
-            # try float
-            try:
-                for v in samples:
-                    if v is None or (isinstance(v, float) and np.isnan(v)):
-                        continue
-                    float(str(v))
-                return 'float'
-            except Exception:
-                pass
-            # boolean-like
-            bool_set = {"true", "false", "True", "False", "0", "1", 0, 1}
-            if all(str(v) in bool_set for v in samples if v is not None):
-                return 'boolean'
-            return 'string'
 
         for chunk in reader:
             if cols is None:
@@ -316,14 +295,16 @@ def main():
                 'enums': enums_str,
             }
 
-            # dd fields
+            # dd fields (case-insensitive)
             if dd_dtype_map:
-                row['dd_dtype'] = dd_dtype_map.get(c, "")
-            if dd_info_map and c in dd_info_map:
-                for k, v in dd_info_map[c].items():
-                    if k == 'variable_name':
-                        continue
-                    row[f'dd_{k}'] = v
+                row['dd_dtype'] = dd_dtype_map.get(c.lower(), "")
+            if dd_info_map:
+                info = dd_info_map.get(c.lower())
+                if info:
+                    for k, v in info.items():
+                        if k == 'variable_name':
+                            continue
+                        row[f'dd_{k}'] = v
 
             summary_rows.append(row)
 

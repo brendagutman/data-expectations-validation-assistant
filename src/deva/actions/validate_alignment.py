@@ -269,6 +269,9 @@ def generate_validation_html(results: Dict[str, Any], out_path: str) -> None:
     total_failures = sum(len(f) for f in results['all_failures'].values())
     total_checks = results['total_checks']
     
+    # determine status html separately to avoid escaping issues in f-string
+    status_html = '<span class="pass">✓ PASS</span>' if total_failures == 0 else '<span class="fail">✗ FAIL</span>'
+    
     html_parts = [
         "<html><head><meta charset='utf-8'><title>Data Alignment Validation Report</title>",
         css,
@@ -278,7 +281,7 @@ def generate_validation_html(results: Dict[str, Any], out_path: str) -> None:
         "<h2>Summary</h2>",
         f"<div class='summary-item'>Total Checks: {total_checks}</div>",
         f"<div class='summary-item'>Total Failures: <strong>{total_failures}</strong></div>",
-        f"<div class='summary-item'>Status: {'<span class=\"pass\">✓ PASS</span>' if total_failures == 0 else '<span class=\"fail\">✗ FAIL</span>'}</div>",
+        f"<div class='summary-item'>Status: {status_html}</div>",
     ]
     # if there are warnings, show them on the next line inside the summary
     if results.get('warnings'):
