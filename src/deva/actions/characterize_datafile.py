@@ -70,9 +70,10 @@ def generate_html_report(df: Optional[pd.DataFrame], out_path: str, filename: st
             elif hide_enums and col in hide_enums:
                 top_vals_str = "SKIP"
             else:
+                # show all unique values by default (not just top 5)
                 try:
-                    top_vals = series.value_counts(dropna=True).head(5)
-                    top_vals_str = "; ".join([f"{html.escape(str(v))} ({int(c)})" for v, c in top_vals.items()])
+                    uniq = sorted(series.dropna().unique())
+                    top_vals_str = "; ".join([html.escape(str(v)) for v in uniq])
                 except Exception:
                     top_vals_str = ""
 
@@ -115,9 +116,11 @@ def generate_html_report(df: Optional[pd.DataFrame], out_path: str, filename: st
     css = """
     <style>
       body { font-family: Arial, sans-serif; margin: 20px; }
-      table { border-collapse: collapse; margin-bottom: 20px; }
-      th, td { border: 1px solid #ddd; padding: 8px; }
+      table { border-collapse: collapse; margin-bottom: 20px; width: 100%; }
+      th, td { border: 1px solid #ddd; padding: 8px; text-align: left; vertical-align: top; }
       th { background: #f2f2f2; }
+      /* Allow long enum content to wrap and expand cells */
+      td { word-wrap: break-word; overflow-wrap: break-word; white-space: normal; max-width: none; }
     </style>
     """
 
@@ -272,12 +275,12 @@ def main():
                 except Exception:
                     enums_str = ""
             elif hide_enums and c in hide_enums:
-                enums_str = "SKIP"
+                enums_str = "HIDDEN VIA COMMANDLINE FLAG"
             else:
-                # top 5 from counter
+                # show all unique values by default (not just top 5)
                 try:
-                    top_vals = stats[c]['counter'].most_common(5)
-                    enums_str = "; ".join([f"{html.escape(str(v))} ({int(cnt)})" for v, cnt in top_vals])
+                    uniq = sorted([str(x) for x in stats[c]['sample_vals']])
+                    enums_str = "; ".join([html.escape(str(v)) for v in uniq])
                 except Exception:
                     enums_str = ""
 
