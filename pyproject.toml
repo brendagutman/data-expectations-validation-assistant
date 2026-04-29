@@ -30,3 +30,4 @@ deva = []
 characterize_datafile = "deva.actions.characterize_datafile:main"
 validate_alignment = "deva.actions.validate_alignment:main"
 generate_datadictionary = "deva.actions.generate_datadictionary:main"
+merge_datadictionary = "deva.actions.merge_datadictionary:main"
