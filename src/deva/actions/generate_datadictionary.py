@@ -5,7 +5,7 @@ import numpy as np
 import sys
 from collections import Counter
 from typing import Optional
-from deva.common import convert_df_dtypes, format_dtype_for_display, infer_dtype_from_samples
+from deva.common import convert_df_dtypes, format_dtype_for_display, infer_dtype_from_samples, read_file, write_file
 from pathlib import Path
 from datetime import date
 
@@ -67,27 +67,31 @@ def generate_data_dictionary(df: pd.DataFrame,
         })
 
     return pd.DataFrame(data_dict)
-    
+
 def main():
     parser = argparse.ArgumentParser(description="Generate a data dictionary from a datafile.")
-    parser.add_argument("-df","--data_file", required=True, help="Path to the datafile (CSV)")
+    parser.add_argument("-df","--data_file", required=True, help="Path to the datafile (CSV or Excel)")
     parser.add_argument("-o", "--output", required=False, help="Output data dictionary CSV path")
     parser.add_argument("--show-enums", required=False,
                         help="Comma-separated columns for which enumerations should be included")
     parser.add_argument("--hide-enums", required=False,
                         help="Comma-separated columns for which enumerations should be suppressed")
     parser.add_argument("--chunksize", required=False, type=int, default=0,
-                        help="Read the datafile in chunks (streaming) instead of loading whole file")
+                        help="Process the datafile in chunks instead of all at once")
     parser.add_argument("--low-memory", action="store_true",
                         help="Pass low_memory=True to pandas.read_csv (uses less memory at cost of dtype inference)")
     args = parser.parse_args()
 
-    file_path = args.data_file
-    filename = Path(file_path).stem
+    file_path = Path(args.data_file)
+    filename = file_path.stem
+    file_dir = file_path.parent
+    file_ext = file_path.suffix.lower()
 
-    out_path = filename + "_dd" + str(date.today().strftime("%Y%m%d")) + ".csv" if not args.output else args.output
+    out_path = args.output or file_dir / f"deva_files/{filename}_Dictionary.csv"
+    output_dir = Path(out_path).parent
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    # For now assume local CSV. In future, support file-location to read from other stores.
+    # Supports local CSV and Excel files.
     chunksize = int(args.chunksize) if args.chunksize is not None else 0
     low_memory_flag = bool(args.low_memory)
 
@@ -101,10 +105,17 @@ def main():
     if args.hide_enums:
         hide_enums = {c.strip() for c in args.hide_enums.split(',') if c.strip()}
 
-    # if streaming requested, aggregate stats chunk-by-chunk
+    # if chunked processing requested, aggregate stats chunk-by-chunk
     if chunksize > 0:
         print(f"Streaming-generating data dictionary for '{file_path}' (chunksize={chunksize})...")
-        reader = pd.read_csv(file_path, chunksize=chunksize, low_memory=low_memory_flag)
+        reader_obj = read_file(file_path, chunksize=chunksize, low_memory=low_memory_flag)
+        if isinstance(reader_obj, pd.DataFrame):
+            # Non-CSV readers (e.g., Excel) return a DataFrame; chunk it in memory.
+            reader = (reader_obj.iloc[i:i + chunksize] for i in range(0, len(reader_obj), chunksize))
+        else:
+            # CSV may return a TextFileReader iterator when chunksize is provided.
+            reader = reader_obj
+
         total_rows = 0
         stats = {}
         cols = None
@@ -159,6 +170,9 @@ def main():
                     if mx is not None:
                         if stats[c]['max'] is None or mx > stats[c]['max']:
                             stats[c]['max'] = mx
+        if cols is None:
+            parser.error(f"No rows found in input file: {file_path}")
+
         # build dataframe
         rows = []
         for c in cols:
@@ -202,17 +216,17 @@ def main():
             })
 
         data_dict_df = pd.DataFrame(rows)
-        data_dict_df.to_csv(out_path, index=False)
+        write_file(out_path, data_dict_df)
         print(f"Wrote data dictionary to: {out_path}")
         return
 
     # non-streaming path
-    df = pd.read_csv(file_path, low_memory=low_memory_flag)
+    df = read_file(file_path)
 
     df = convert_df_dtypes(df)
     print(f"Generating data dictionary for '{file_path}' ({df.shape[0]} rows, {df.shape[1]} cols)...")
     data_dict_df = generate_data_dictionary(df, show_enums=show_enums, hide_enums=hide_enums)
-    data_dict_df.to_csv(out_path, index=False)
+    write_file(out_path, data_dict_df)
     print(f"Wrote data dictionary to: {out_path}")
 
 

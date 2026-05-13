@@ -3,7 +3,7 @@ import pandas as pd
 from pathlib import Path
 from datetime import date
 from typing import Optional
-from deva.common import convert_df_dtypes
+from deva.common import convert_df_dtypes, read_file, write_file
 from deva.actions.generate_datadictionary import generate_data_dictionary
 
 # Fields that are auto-generated and should be compared for differences.
@@ -110,7 +110,11 @@ def merge_data_dictionaries(generated: pd.DataFrame, existing: pd.DataFrame) -> 
     gen_cols_used = []
     if any_varname_mismatch:
         gen_cols_used.append("variable_name_gen")
-    gen_cols_used += [c for c in gen_suffix_cols.values() if any(c in r for r in rows)]
+    gen_cols_used += [
+        c
+        for c in gen_suffix_cols.values()
+        if any(c in r and str(r.get(c, "")).strip() != "" for r in rows)
+    ]
 
     # Column order: expected DD columns first, then extra columns from existing DD, then _gen columns
     expected_cols = list(generated.columns)  # variable_name, description, data_type, min, max, units, enumerations, comment
@@ -132,9 +136,12 @@ def main():
                         help="Comma-separated columns for which enumerations should be suppressed")
     args = parser.parse_args()
 
-    file_path = args.data_file
+    file_path = Path(args.data_file)
     filename = Path(file_path).stem
-    out_path = args.output or f"{filename}_merged_dd{date.today().strftime('%Y%m%d')}.csv"
+    file_dir = file_path.parent
+    out_path = args.output or file_dir / f"deva_files/{filename}_Dictionary.csv"
+    output_dir = Path(out_path).parent
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     if args.show_enums and args.hide_enums:
         parser.error("--show-enums and --hide-enums cannot be used together")
@@ -142,13 +149,13 @@ def main():
     show_enums: Optional[set] = {c.strip() for c in args.show_enums.split(",") if c.strip()} if args.show_enums else None
     hide_enums: Optional[set] = {c.strip() for c in args.hide_enums.split(",") if c.strip()} if args.hide_enums else None
 
-    df = pd.read_csv(file_path)
+    df = read_file(file_path)
     df = convert_df_dtypes(df)
     print(f"Generating data dictionary for '{file_path}' ({df.shape[0]} rows, {df.shape[1]} cols)...")
     generated = generate_data_dictionary(df, show_enums=show_enums, hide_enums=hide_enums)
 
     if args.data_dictionary:
-        existing = pd.read_csv(args.data_dictionary)
+        existing = read_file(args.data_dictionary)
         existing = normalize_dd_columns(existing)
         if "variable_name" not in existing.columns:
             parser.error(
@@ -160,7 +167,7 @@ def main():
     else:
         result = generated
 
-    result.to_csv(out_path, index=False)
+    write_file(out_path, result)
     print(f"Wrote merged data dictionary to: {out_path}")
 
 
