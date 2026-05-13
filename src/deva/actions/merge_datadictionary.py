@@ -1,10 +1,12 @@
 import argparse
 import pandas as pd
 from pathlib import Path
-from datetime import date
 from typing import Optional
-from deva.common import convert_df_dtypes, read_file, write_file
-from deva.actions.generate_datadictionary import generate_data_dictionary
+from deva.common import read_file, write_file
+from deva.datadictionary_utils import (
+    generate_data_dictionary_from_file,
+    parse_enum_filters,
+)
 
 # Fields that are auto-generated and should be compared for differences.
 GENERATED_FIELDS = ["data_type", "min", "max", "enumerations"]
@@ -134,6 +136,18 @@ def main():
                         help="Comma-separated columns for which enumerations should be included")
     parser.add_argument("--hide-enums", required=False,
                         help="Comma-separated columns for which enumerations should be suppressed")
+    parser.add_argument(
+        "--chunksize",
+        required=False,
+        type=int,
+        default=0,
+        help="Process the datafile in chunks instead of all at once",
+    )
+    parser.add_argument(
+        "--low-memory",
+        action="store_true",
+        help="Pass low_memory=True to pandas.read_csv (uses less memory at cost of dtype inference)",
+    )
     args = parser.parse_args()
 
     file_path = Path(args.data_file)
@@ -143,16 +157,28 @@ def main():
     output_dir = Path(out_path).parent
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    if args.show_enums and args.hide_enums:
-        parser.error("--show-enums and --hide-enums cannot be used together")
+    chunksize = int(args.chunksize) if args.chunksize is not None else 0
+    low_memory_flag = bool(args.low_memory)
 
-    show_enums: Optional[set] = {c.strip() for c in args.show_enums.split(",") if c.strip()} if args.show_enums else None
-    hide_enums: Optional[set] = {c.strip() for c in args.hide_enums.split(",") if c.strip()} if args.hide_enums else None
+    try:
+        show_enums, hide_enums = parse_enum_filters(args.show_enums, args.hide_enums)
+    except ValueError as exc:
+        parser.error(str(exc))
 
-    df = read_file(file_path)
-    df = convert_df_dtypes(df)
-    print(f"Generating data dictionary for '{file_path}' ({df.shape[0]} rows, {df.shape[1]} cols)...")
-    generated = generate_data_dictionary(df, show_enums=show_enums, hide_enums=hide_enums)
+    if chunksize > 0:
+        print(
+            f"Streaming-generating data dictionary for '{file_path}' (chunksize={chunksize})..."
+        )
+    else:
+        print(f"Generating data dictionary for '{file_path}'...")
+
+    generated = generate_data_dictionary_from_file(
+        file_path,
+        show_enums=show_enums,
+        hide_enums=hide_enums,
+        chunksize=chunksize,
+        low_memory=low_memory_flag,
+    )
 
     if args.data_dictionary:
         existing = read_file(args.data_dictionary)

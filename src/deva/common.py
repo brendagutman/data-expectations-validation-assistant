@@ -51,13 +51,14 @@ def convert_df_dtypes(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def format_dtype_for_display(dtype_str: str) -> str:
+def format_dtype_for_display(dtype_str) -> str:
     """Format dtype string for display, e.g. 'int64' -> 'integer'."""
+
     dtype_str = str(dtype_str).lower()
     if dtype_str in ('int64', 'int32', 'int16', 'int8', 'int'):
         return 'integer'
     elif dtype_str in ('float64', 'float32', 'float'):
-        return 'float'
+        return "number"
     elif dtype_str == 'object':
         return 'string'
     elif dtype_str == 'bool':
@@ -151,8 +152,7 @@ def read_file(filepath, **kwargs):
             with open(path, encoding=encoding) as f:
                 return yaml.safe_load(f)
         elif file_ext == ".csv":
-            # Try reading as string dtype for safety; allow caller overrides
-            csv_kwargs = {"header": 0, "dtype": "string", "encoding": encoding}
+            csv_kwargs = {"header": 0, "encoding": encoding}
             csv_kwargs.update(kwargs)
             return pd.read_csv(path, **csv_kwargs)
         elif file_ext == ".xlsx":

@@ -1,72 +1,24 @@
 import argparse
 import pandas as pd
-import html
-import numpy as np
-import sys
-from collections import Counter
 from typing import Optional
-from deva.common import convert_df_dtypes, format_dtype_for_display, infer_dtype_from_samples, read_file, write_file
+from deva.common import write_file
+from deva.datadictionary_utils import (
+    generate_data_dictionary_from_dataframe,
+    generate_data_dictionary_from_file,
+    parse_enum_filters,
+)
 from pathlib import Path
-from datetime import date
+
 
 def generate_data_dictionary(df: pd.DataFrame,
                              show_enums: Optional[set] = None,
                              hide_enums: Optional[set] = None) -> pd.DataFrame:
-    """Generate a data dictionary from a DataFrame.
-
-    The data dictionary includes variable name, description (empty), data type, min, max, units (empty), enumerations, and comment (empty).
-    
-    If show_enums is provided, populate enumerations for those columns with all unique values.
-    If hide_enums is provided, skip enumeration population for those columns.
-    """
-    # When neither show_enums nor hide_enums are provided, auto-populate
-    # enumerations for low-cardinality columns. Adjust this threshold as needed.
-    AUTO_ENUM_MAX = 50
-
-    data_dict = []
-    for col in df.columns:
-        series = df[col]
-        dtype = format_dtype_for_display(str(series.dtype))
-        
-        enums_str = ""
-        unique_count = int(series.dropna().nunique()) if series.notna().any() else 0
-
-        if show_enums and col in show_enums:
-            # show all unique values (sorted), separated by semicolon
-            try:
-                uniq = sorted(series.dropna().unique())
-                enums_str = ";".join([str(v) for v in uniq])
-            except Exception:
-                enums_str = ""
-        elif hide_enums and col in hide_enums:
-            enums_str = ""
-        else:
-            # If explicit show_enums was provided we only populate those.
-            # Otherwise auto-populate for low-cardinality columns, but respect hide_enums.
-            if show_enums:
-                enums_str = ""
-            else:
-                if unique_count > 0 and unique_count <= AUTO_ENUM_MAX and (not hide_enums or col not in hide_enums):
-                    try:
-                        uniq = sorted(series.dropna().unique())
-                        enums_str = ";".join([str(v) for v in uniq])
-                    except Exception:
-                        enums_str = ""
-                else:
-                    enums_str = ""
-
-        data_dict.append({
-            "variable_name": col,
-            "description": "",
-            "data_type": dtype,
-            "min": "",
-            "max": "",
-            "units": "",
-            "enumerations": enums_str,
-            "comment": "",
-        })
-
-    return pd.DataFrame(data_dict)
+    """Backward-compatible wrapper around shared DD generation logic."""
+    return generate_data_dictionary_from_dataframe(
+        df,
+        show_enums=show_enums,
+        hide_enums=hide_enums,
+    )
 
 def main():
     parser = argparse.ArgumentParser(description="Generate a data dictionary from a datafile.")
@@ -95,137 +47,25 @@ def main():
     chunksize = int(args.chunksize) if args.chunksize is not None else 0
     low_memory_flag = bool(args.low_memory)
 
-    # process enumeration flags
-    show_enums: Optional[set] = None
-    hide_enums: Optional[set] = None
-    if args.show_enums and args.hide_enums:
-        parser.error("--show-enums and --hide-enums cannot be used together")
-    if args.show_enums:
-        show_enums = {c.strip() for c in args.show_enums.split(',') if c.strip()}
-    if args.hide_enums:
-        hide_enums = {c.strip() for c in args.hide_enums.split(',') if c.strip()}
+    try:
+        show_enums, hide_enums = parse_enum_filters(args.show_enums, args.hide_enums)
+    except ValueError as exc:
+        parser.error(str(exc))
 
-    # if chunked processing requested, aggregate stats chunk-by-chunk
     if chunksize > 0:
-        print(f"Streaming-generating data dictionary for '{file_path}' (chunksize={chunksize})...")
-        reader_obj = read_file(file_path, chunksize=chunksize, low_memory=low_memory_flag)
-        if isinstance(reader_obj, pd.DataFrame):
-            # Non-CSV readers (e.g., Excel) return a DataFrame; chunk it in memory.
-            reader = (reader_obj.iloc[i:i + chunksize] for i in range(0, len(reader_obj), chunksize))
-        else:
-            # CSV may return a TextFileReader iterator when chunksize is provided.
-            reader = reader_obj
+        print(
+            f"Streaming-generating data dictionary for '{file_path}' (chunksize={chunksize})..."
+        )
+    else:
+        print(f"Generating data dictionary for '{file_path}'...")
 
-        total_rows = 0
-        stats = {}
-        cols = None
-        UNIQUE_CAP = 200
-        AUTO_ENUM_MAX = 50
-
-        for chunk in reader:
-            if cols is None:
-                cols = list(chunk.columns)
-                for c in cols:
-                    stats[c] = {
-                        'counter': Counter(),
-                        'sample_vals': set(),
-                        'sample': None,
-                        'min': None,
-                        'max': None,
-                        'unique_truncated': False,
-                    }
-            total_rows += len(chunk)
-            for c in cols:
-                s = chunk[c]
-                # sample value
-                if stats[c]['sample'] is None:
-                    non_null = s.dropna()
-                    if not non_null.empty:
-                        stats[c]['sample'] = non_null.iloc[0]
-                # counters for enums
-                try:
-                    vals = s.dropna().astype(str).tolist()
-                except Exception:
-                    vals = [str(v) for v in s.dropna().tolist()]
-                stats[c]['counter'].update(vals)
-                # unique sample values
-                if not stats[c]['unique_truncated']:
-                    uniqs = pd.unique(s.dropna())
-                    for v in uniqs:
-                        if len(stats[c]['sample_vals']) < UNIQUE_CAP:
-                            stats[c]['sample_vals'].add(v)
-                        else:
-                            stats[c]['unique_truncated'] = True
-                            break
-                # min/max for numeric
-                if pd.api.types.is_numeric_dtype(s):
-                    try:
-                        mn = s.min(skipna=True)
-                        mx = s.max(skipna=True)
-                    except Exception:
-                        mn = None; mx = None
-                    if mn is not None:
-                        if stats[c]['min'] is None or mn < stats[c]['min']:
-                            stats[c]['min'] = mn
-                    if mx is not None:
-                        if stats[c]['max'] is None or mx > stats[c]['max']:
-                            stats[c]['max'] = mx
-        if cols is None:
-            parser.error(f"No rows found in input file: {file_path}")
-
-        # build dataframe
-        rows = []
-        for c in cols:
-            sample_vals = list(stats[c]['sample_vals'])
-            dtype = infer_dtype_from_samples(sample_vals[:20])
-            min_val = stats[c]['min'] if stats[c]['min'] is not None else ""
-            max_val = stats[c]['max'] if stats[c]['max'] is not None else ""
-            unique_count = len(sample_vals) if not stats[c]['unique_truncated'] else len(sample_vals)
-
-            enums_str = ""
-            if show_enums and c in show_enums:
-                try:
-                    uniq = sorted(sample_vals)
-                    enums_str = ";".join([str(v) for v in uniq])
-                except Exception:
-                    enums_str = ""
-            elif hide_enums and c in hide_enums:
-                enums_str = ""
-            else:
-                if show_enums:
-                    enums_str = ""
-                else:
-                    if unique_count > 0 and unique_count <= AUTO_ENUM_MAX and (not hide_enums or c not in hide_enums):
-                        try:
-                            uniq = sorted(sample_vals)
-                            enums_str = ";".join([str(v) for v in uniq])
-                        except Exception:
-                            enums_str = ""
-                    else:
-                        enums_str = ""
-
-            rows.append({
-                "variable_name": c,
-                "description": "",
-                "data_type": dtype,
-                "min": min_val,
-                "max": max_val,
-                "units": "",
-                "enumerations": enums_str,
-                "comment": "",
-            })
-
-        data_dict_df = pd.DataFrame(rows)
-        write_file(out_path, data_dict_df)
-        print(f"Wrote data dictionary to: {out_path}")
-        return
-
-    # non-streaming path
-    df = read_file(file_path)
-
-    df = convert_df_dtypes(df)
-    print(f"Generating data dictionary for '{file_path}' ({df.shape[0]} rows, {df.shape[1]} cols)...")
-    data_dict_df = generate_data_dictionary(df, show_enums=show_enums, hide_enums=hide_enums)
+    data_dict_df = generate_data_dictionary_from_file(
+        file_path,
+        show_enums=show_enums,
+        hide_enums=hide_enums,
+        chunksize=chunksize,
+        low_memory=low_memory_flag,
+    )
     write_file(out_path, data_dict_df)
     print(f"Wrote data dictionary to: {out_path}")
 
