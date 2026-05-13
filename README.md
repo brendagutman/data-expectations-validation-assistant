@@ -6,7 +6,8 @@
 
 ## Requirements
 
-- Python >= 3.10
+- Python >= 3.10 
+- Python 3.13 recommended.
 
 Dependencies (installed automatically):
 - [`pandas`](https://pandas.pydata.org/) — data loading and manipulation
@@ -26,7 +27,7 @@ source .venv/bin/activate
 Install from GitHub:
 
 ```bash
-pip install git+https://github.com/brendagutman/data-expectations-validation-assistant.git
+pip install git+https://github.com/carrollaboratory/DEVA.git@v1.0.0
 ```
 
 Or install locally from source:
