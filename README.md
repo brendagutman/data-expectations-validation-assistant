@@ -24,10 +24,17 @@ python -m venv .venv
 source .venv/bin/activate
 ```
 
-Install from GitHub:
+Install from GitHub use one of the following methods:
 
 ```bash
+pip install git+https://github.com/carrollaboratory/DEVA.git
+
+# To install a specific version, place the tag after the @ symbol.
 pip install git+https://github.com/carrollaboratory/DEVA.git@v1.0.0
+
+# If you have previously installed this package, pip may use a cached version. To force a fresh install:
+pip install --no-cache-dir --force-reinstall git+https://github.com/carrollaboratory/DEVA.git
+
 ```
 
 Or install locally from source:
